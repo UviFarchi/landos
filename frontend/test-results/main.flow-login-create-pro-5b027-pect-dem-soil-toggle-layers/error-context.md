@@ -1,0 +1,49 @@
+# Page snapshot
+
+```yaml
+- main [ref=e4]:
+  - heading "Project" [level=2] [ref=e5]
+  - generic [ref=e6]:
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e9]: Name
+        - generic [ref=e10]: United States of America-Webster-20251221T193951Z
+      - generic [ref=e11]:
+        - generic [ref=e12]: Owner
+        - generic [ref=e13]: e2euser
+      - generic [ref=e14]:
+        - generic [ref=e15]: Area
+        - generic [ref=e16]: 980.543425618378 ha
+      - generic [ref=e17]:
+        - generic [ref=e18]: Location
+        - generic [ref=e19]: USA · Webster
+    - generic [ref=e20]:
+      - button "Soil layer" [ref=e22] [cursor=pointer]
+      - generic [active] [ref=e24]:
+        - generic [ref=e27]: ↑
+        - table [ref=e29]:
+          - rowgroup [ref=e30]:
+            - row "Lat 42.54454846026823" [ref=e31]:
+              - cell "Lat" [ref=e32]
+              - cell "42.54454846026823" [ref=e33]:
+                - spinbutton [ref=e34]: "42.54454846026823"
+            - row "Lon -94.44233901099355" [ref=e35]:
+              - cell "Lon" [ref=e36]
+              - cell "-94.44233901099355" [ref=e37]:
+                - spinbutton [ref=e38]: "-94.44233901099355"
+            - row "Pitch 45" [ref=e39]:
+              - cell "Pitch" [ref=e40]
+              - cell "45" [ref=e41]:
+                - spinbutton [ref=e42]: "45"
+            - row "Bearing 0" [ref=e43]:
+              - cell "Bearing" [ref=e44]
+              - cell "0" [ref=e45]:
+                - spinbutton [ref=e46]: "0"
+            - row "Zoom 12" [ref=e47]:
+              - cell "Zoom" [ref=e48]
+              - cell "12" [ref=e49]:
+                - spinbutton [ref=e50]: "12"
+      - generic [ref=e52]:
+        - generic [ref=e53]: Inspector
+        - generic [ref=e54]: Click on the map to inspect a point.
+```

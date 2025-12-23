@@ -1,0 +1,1 @@
+# Endpoint handlers for module assembly actions. This will control the action effects, for example, for action measure moisture this endpoint will recieve the resulting data and call the analytics API to load it.

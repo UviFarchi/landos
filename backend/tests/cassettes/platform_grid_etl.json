@@ -1,0 +1,98 @@
+{
+  "interactions": [
+    {
+      "request": {
+        "method": "POST",
+        "url": "/api/platform/projects",
+        "body": {
+          "username": "alice",
+          "name": "Grid Project",
+          "geometry": {
+            "type": "FeatureCollection",
+            "features": [
+              {
+                "type": "Feature",
+                "properties": {},
+                "geometry": {
+                  "coordinates": [
+                    [
+                      [
+                        -98.23415786446807,
+                        32.959322081616676
+                      ],
+                      [
+                        -98.24727577903442,
+                        32.95944178128515
+                      ],
+                      [
+                        -98.2474663636282,
+                        32.95219778522704
+                      ],
+                      [
+                        -98.2271936426964,
+                        32.95299833683271
+                      ],
+                      [
+                        -98.22895853654724,
+                        32.95387888862075
+                      ],
+                      [
+                        -98.22914937845624,
+                        32.95519969573792
+                      ],
+                      [
+                        -98.23115273804162,
+                        32.95499957540889
+                      ],
+                      [
+                        -98.23253601575324,
+                        32.95632037042428
+                      ],
+                      [
+                        -98.23449171707628,
+                        32.95804136867211
+                      ],
+                      [
+                        -98.23430100638997,
+                        32.95900188964512
+                      ],
+                      [
+                        -98.23415786446807,
+                        32.959322081616676
+                      ]
+                    ]
+                  ],
+                  "type": "Polygon"
+                },
+                "id": 0
+              }
+            ]
+          }
+        }
+      },
+      "response": {
+        "status": 201,
+        "headers": {
+          "content-length": "43",
+          "content-type": "application/json"
+        },
+        "body_b64": "eyJvayI6dHJ1ZSwicHJvamVjdF9pZCI6IjMwYWFkNTZlOGVlZGMxMjMifQ=="
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "url": "/api/platform/projects/30aad56e8eedc123/grid",
+        "body": null
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "content-length": "27",
+          "content-type": "application/json"
+        },
+        "body_b64": "eyJkZXRhaWwiOiJHcmlkIG5vdCBmb3VuZCJ9"
+      }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+pytest
+motor
+fastapi
+httpx
+uvicorn
+shapely
+pyproj
+pyshp
+rasterio
+numpy
