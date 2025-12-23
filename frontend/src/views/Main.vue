@@ -57,7 +57,7 @@
             <div class="panel-title">Project</div>
             <div class="row"><span class="label">Name</span><span class="value text-left">{{ project.name }}</span></div>
             <div class="row"><span class="label">Owner</span><span class="value text-left">{{ project.username }}</span></div>
-            <div class="row"><span class="label">Area</span><span class="value text-left">{{ project.area_hectares || '—' }} ha</span></div>
+            <div class="row"><span class="label">Area</span><span class="value text-left">{{ project.area_hectares ? project.area_hectares.toFixed(3) : '—' }} ha</span></div>
             <div class="row"><span class="label">Min Elev</span><span class="value text-left">{{ demStats.min ?? '—' }} m</span></div>
             <div class="row"><span class="label">Max Elev</span><span class="value text-left">{{ demStats.max ?? '—' }} m</span></div>
             <div class="row">
@@ -71,8 +71,28 @@
             <div v-if="inspector">
               <div class="value small">Lat {{ inspector.lat }}, Lon {{ inspector.lon }}</div>
               <div class="value small" v-if="inspector.row != null && inspector.col != null">Row {{ inspector.row }}, Col {{ inspector.col }}</div>
-              <div class="value small">Topography: Elev {{ inspector.dem ?? '—' }} | Slope {{ inspector.slope ? inspector.slope.toFixed(2) : '—' }}° | Aspect {{ inspector.aspect ? inspector.aspect.toFixed(1) : '—' }}°</div>
-              <div class="value small" v-if="layers.soil">Soil: {{ inspector.soil ? (inspector.soil.compname || inspector.soil.muname || inspector.soil.mukey || '—') : '—' }}</div>
+              <table class="inspector-table">
+                <thead><tr><th colspan="2">Topography</th></tr></thead>
+                <tbody>
+                  <tr><td>Elevation</td><td>{{ inspector.dem ?? '—' }}</td></tr>
+                  <tr><td>Slope</td><td>{{ inspector.slope ? inspector.slope.toFixed(2) : '—' }}°</td></tr>
+                  <tr><td>Aspect</td><td>{{ inspector.aspect ? inspector.aspect.toFixed(1) : '—' }}°</td></tr>
+                </tbody>
+              </table>
+              <table class="inspector-table" v-if="layers.soil">
+                <thead><tr><th colspan="2">Soil</th></tr></thead>
+                <tbody>
+                  <tr><td>Soil</td><td>{{ inspector.soil ? (inspector.soil.compname || inspector.soil.muname || inspector.soil.mukey || '—') : '—' }}</td></tr>
+                  <tr v-if="soilAttr(inspector.soil, 'muname')"><td>Unit</td><td>{{ soilAttr(inspector.soil, 'muname') }}</td></tr>
+                  <tr v-if="soilAttr(inspector.soil, 'compname')"><td>Component</td><td>{{ soilAttr(inspector.soil, 'compname') }}</td></tr>
+                  <tr v-if="soilAttr(inspector.soil, 'drainagecl')"><td>Drainage</td><td>{{ soilAttr(inspector.soil, 'drainagecl') }}</td></tr>
+                  <tr v-if="soilAttr(inspector.soil, 'ph', 'ph1to1h2o_r')"><td>pH</td><td>{{ soilAttr(inspector.soil, 'ph', 'ph1to1h2o_r') }}</td></tr>
+                  <tr v-if="soilAttr(inspector.soil, 'organic_matter', 'om_r')"><td>Organic matter</td><td>{{ soilAttr(inspector.soil, 'organic_matter', 'om_r') }}</td></tr>
+                  <tr v-if="soilAttr(inspector.soil, 'water_capacity', 'awc_r')"><td>Water capacity</td><td>{{ soilAttr(inspector.soil, 'water_capacity', 'awc_r') }}</td></tr>
+                  <tr v-if="soilAttr(inspector.soil, 'sand', 'sandtotal_r')"><td>Sand</td><td>{{ soilAttr(inspector.soil, 'sand', 'sandtotal_r') }}</td></tr>
+                  <tr v-if="soilAttr(inspector.soil, 'clay', 'claytotal_r')"><td>Clay</td><td>{{ soilAttr(inspector.soil, 'clay', 'claytotal_r') }}</td></tr>
+                </tbody>
+              </table>
             </div>
             <div v-else class="muted small">Click on the map to inspect a point.</div>
           </div>
@@ -310,6 +330,15 @@ export default {
       demStats,
       gridError,
       soilLoading,
+      soilAttr: (soil, ...keys) => {
+        if (!soil) return null;
+        for (const k of keys) {
+          if (Object.prototype.hasOwnProperty.call(soil, k) && soil[k] !== null && typeof soil[k] !== 'undefined') {
+            return soil[k];
+          }
+        }
+        return null;
+      },
       toggle,
       handlePick,
       loadSoil,
@@ -408,6 +437,23 @@ export default {
   border-radius: 12px;
   padding: 12px;
 }
+.inspector-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+.inspector-table th {
+  text-align: left;
+  padding: 4px 6px;
+  color: #cbd5e1;
+  font-size: 13px;
+}
+.inspector-table td {
+  padding: 4px 6px;
+  border-top: 1px solid #1e293b;
+  font-size: 13px;
+  color: #e2e8f0;
+}
 .alert {
   background: #1f2937;
   border: 1px solid #f59e0b;
@@ -433,6 +479,9 @@ export default {
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 6px;
+  text-align: left;
+}
+.info-card .row .value {
   text-align: left;
 }
 .panel-title {

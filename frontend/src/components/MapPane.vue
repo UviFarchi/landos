@@ -261,20 +261,32 @@ export default {
     _soilColorFor(key) {
       const k = key ?? 'soil';
       if (!this._soilColorCache[k]) {
-        // keep colors in the red family; vary saturation/lightness per key
+        // keep colors in red/brown family; vary hue/sat/light per key for contrast
         const hash = Math.abs(
           String(k)
             .split('')
             .reduce((acc, ch) => ((acc << 5) - acc + ch.charCodeAt(0)) | 0, 0),
         );
-        const hue = 0; // fixed red hue
-        const saturation = 70 + (hash % 20); // 70-89%
-        const lightness = 45 + (hash % 25); // 45-69
+        const rawHue = (hash % 70) - 10; // allow slight wrap into deep reds
+        const hue = rawHue < 0 ? 360 + rawHue : rawHue; // 290-360 or 0-60: reds/browns
+        const saturation = 55 + (hash % 35); // 55-89%
+        const lightness = 25 + (hash % 45); // 25-69% for browns/reds
         const c = (1 - Math.abs(2 * lightness / 100 - 1)) * (saturation / 100);
-        const x = 0; // hue=0 => no green/blue
+        const hPrime = hue / 60;
+        const x = c * (1 - Math.abs((hPrime % 2) - 1));
+        let r = 0; let g = 0; let b = 0;
+        if (hPrime >= 0 && hPrime < 1) { r = c; g = x; b = 0; }
+        else if (hPrime < 2) { r = x; g = c; b = 0; }
+        else if (hPrime < 3) { r = 0; g = c; b = x; }
+        else if (hPrime < 4) { r = 0; g = x; b = c; }
+        else if (hPrime < 5) { r = x; g = 0; b = c; }
+        else { r = c; g = 0; b = x; }
         const m = lightness / 100 - c / 2;
-        const rgb = [c, x, 0];
-        this._soilColorCache[k] = rgb.map((v) => Math.round((v + m) * 255));
+        this._soilColorCache[k] = [
+          Math.round((r + m) * 255),
+          Math.round((g + m) * 255),
+          Math.round((b + m) * 255),
+        ];
       }
       return this._soilColorCache[k];
     },
@@ -384,7 +396,7 @@ export default {
         const r = cell.row;
         const c = cell.col;
         const code = this._soilGrid?.[r]?.[c];
-        if (code === null || typeof code === 'undefined') continue;
+        if (code === null || typeof code === 'undefined' || code === 0) continue;
         const key = this._soilIndex?.[code] ?? this._soilIndex?.[String(code)] ?? String(code);
         soilCells.push({
           ...cell,
@@ -399,7 +411,6 @@ export default {
       }));
       try { data = JSON.parse(JSON.stringify(data)); } catch (e) {}
       const thickness = 5; // cap height
-      console.log('data',data)
       return new PolygonLayer({
         id: 'soil-overlay',
         data,
@@ -413,7 +424,8 @@ export default {
         elevationScale: 1,
         getFillColor: (d) => {
           const base = this._soilColorFor(d._soilKey);
-          return [...base, 170];
+          if (!base || base.length < 3) return [0, 0, 0, 0];
+          return [...base, 255];
         },
         parameters: { depthTest: true, depthMask: false },
         pickable: false,
