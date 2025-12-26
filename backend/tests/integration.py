@@ -266,6 +266,10 @@ async def test_project_creation_success_persists_and_links_user(platform_config,
             terrain = await analytics_client.analytics.terrain.find_one({"project_id": project_id})
             assert terrain is not None, "Terrain should be stored by ETL after project creation"
             analytics_client.close()
+            layers = terrain.get("etl_layers") or {}
+            assert layers.get("dem", {}).get("status") == "ok"
+            assert layers.get("soil", {}).get("status") == "ok"
+            assert terrain.get("elevation_data") and terrain.get("soil_data")
 
             user = await db.get_db().users.find_one({"username": "alice"})
             linked = user.get("projects") or []
@@ -338,17 +342,22 @@ async def test_grid_endpoint_returns_layers(platform_config, vhs):
                 body = resp.json()
                 assert body.get("layers", {}).get("dem"), "DEM layer should be present"
                 assert body.get("layers", {}).get("soil"), "Soil layer should be present"
+                etl_layers = body.get("etl_layers") or {}
+                assert etl_layers.get("dem", {}).get("status") == "ok"
+                assert etl_layers.get("soil", {}).get("status") == "ok"
 
                 resp = await client.get(f"/api/platform/projects/{project_id}/grid", params={"layer": "dem"})
                 assert resp.status_code == 200
                 filtered = resp.json()
                 assert filtered.get("layer") == "dem"
                 assert filtered.get("data"), "Filtered DEM data should be present"
+                assert filtered.get("etl_layers", {}).get("dem", {}).get("status") == "ok"
                 resp = await client.get(f"/api/platform/projects/{project_id}/grid", params={"layer": "soil"})
                 assert resp.status_code == 200
                 filtered = resp.json()
                 assert filtered.get("layer") == "soil"
                 assert filtered.get("data"), "Filtered soil data should be present"
+                assert filtered.get("etl_layers", {}).get("soil", {}).get("status") == "ok"
 
 @pytest.mark.integration
 @pytest.mark.anyio

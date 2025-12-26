@@ -60,11 +60,13 @@ async def _fetch_tiff(geom, project_id: str):
         "outputFormat": "GTiff",
         "API_Key": config.OPENTOPO_API_KEY,
     }
-    cache_key = f"{project_id}_{minx:.4f}_{miny:.4f}_{maxx:.4f}_{maxy:.4f}.tif".replace(".", "_").replace("-", "m")
-    cache_path = CACHE_DIR / cache_key
-    if cache_path.exists():
+    bbox_key = f"{minx:.4f}_{miny:.4f}_{maxx:.4f}_{maxy:.4f}.tif".replace(".", "_").replace("-", "m")
+    existing = list(CACHE_DIR.glob(f"*_{bbox_key}"))
+    if existing:
+        cache_path = existing[0]
         logger.info("DEM cache hit for project %s -> %s", project_id, cache_path.name)
         return cache_path.read_bytes()
+    cache_path = CACHE_DIR / f"dem_{bbox_key}"
     logger.info("DEM fetch start for project %s (url=%s)", project_id, OPENTOPO_URL)
     async with httpx.AsyncClient() as client:
         resp = await client.get(OPENTOPO_URL, params=params, timeout=OPENTOPO_TIMEOUT)

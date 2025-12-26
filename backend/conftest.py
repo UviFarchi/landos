@@ -37,11 +37,32 @@ class Cassette:
         self._cursor = 0
         self._orig_request = httpx.AsyncClient.request
 
+    def _is_local(self, url: str) -> bool:
+        if not url:
+            return True
+        target = str(url)
+        return target.startswith(
+            (
+                "/",
+                "http://test",
+                "https://test",
+                "http://localhost",
+                "https://localhost",
+                "http://127.0.0.1",
+                "https://127.0.0.1",
+            )
+        )
+
     def _load(self):
         if self.path.exists():
             try:
                 data = json.loads(self.path.read_text())
-                self._playback = data.get("interactions") or data or []
+                interactions = data.get("interactions") or data or []
+                self._playback = [
+                    rec
+                    for rec in interactions
+                    if not self._is_local((rec.get("request") or {}).get("url", ""))
+                ]
             except Exception:
                 self._playback = []
 
@@ -52,11 +73,14 @@ class Cassette:
         payload = {"interactions": self._records}
         self.path.write_text(json.dumps(payload, indent=2))
 
-    def _pop_next(self) -> Optional[Dict[str, Any]]:
-        if self._cursor < len(self._playback):
-            rec = self._playback[self._cursor]
-            self._cursor += 1
-            return rec
+    def _pop_next(self, method: str, url: str) -> Optional[Dict[str, Any]]:
+        target = str(url)
+        for idx in range(self._cursor, len(self._playback)):
+            rec = self._playback[idx]
+            req = rec.get("request") or {}
+            if req.get("method") == method and req.get("url") == target:
+                self._cursor = idx + 1
+                return rec
         return None
 
     def _serialize_response(self, method: str, url: str, kwargs: dict, resp: httpx.Response) -> Dict[str, Any]:
@@ -84,13 +108,17 @@ class Cassette:
         )
 
     async def _patched_request(self, client, method: str, url: str, *args, **kwargs):
-        record = self._pop_next()
+        target_url = str(url)
+        if self._is_local(target_url):
+            return await self._orig_request(client, method, url, *args, **kwargs)
+
+        record = self._pop_next(method, target_url)
         if record and self.mode in {"once", "replay"}:
             return self._response_from_record(record)
         if self.mode == "replay":
-            raise RuntimeError(f"No VHS recording for {method} {url}")
+            raise RuntimeError(f"No VHS recording for {method} {target_url}")
         resp = await self._orig_request(client, method, url, *args, **kwargs)
-        self._records.append(self._serialize_response(method, url, kwargs, resp))
+        self._records.append(self._serialize_response(method, target_url, kwargs, resp))
         return resp
 
     async def __aenter__(self):

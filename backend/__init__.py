@@ -294,17 +294,14 @@ def create_app(
         await _db().projects.update_one({"project_id": project_id}, {"$set": {"status": "etl_pending"}})
         # Trigger ETL for DEM and other layers
         try:
-            loop = asyncio.get_running_loop()
-            async def _run():
-                try:
-                    await analytics.trigger_etl(project_doc)
-                    await _db().projects.update_one({"project_id": project_id}, {"$set": {"status": "ready"}})
-                except Exception as exc:
-                    logger.exception("ETL trigger failed for project %s: %s", project_id, exc)
-                    await _db().projects.update_one({"project_id": project_id}, {"$set": {"status": "etl_failed", "etl_error": str(exc)}})
-            loop.create_task(_run())
+            await analytics.trigger_etl(project_doc)
+            await _db().projects.update_one({"project_id": project_id}, {"$set": {"status": "ready"}})
         except Exception as exc:
             logger.exception("ETL trigger failed for project %s: %s", project_id, exc)
+            await _db().projects.update_one(
+                {"project_id": project_id},
+                {"$set": {"status": "etl_failed", "etl_error": str(exc)}},
+            )
         logger.info("Project '%s' created for user '%s' country=%s subdivision=%s area=%.2f",
                     project_id, cleaned["username"], region.get("country"), region.get("subdivision"), area)
         return JSONResponse(status_code=status.HTTP_201_CREATED, content={"ok": True, "project_id": project_id})

@@ -11,6 +11,7 @@ from shapely import wkt
 import logging
 import numpy as np
 from rasterio.features import rasterize
+import asyncio
 
 from backend.services.analytics.analytics_db_connection import analytics_db
 

@@ -202,6 +202,13 @@ async def test_dem_etl_fetches_and_stores_heightmap(analytics_env, vhs):
     assert elevation.get("heightmap"), "Heightmap should be stored"
     assert elevation.get("min_elevation") is not None, "Min elevation should be recorded"
     assert elevation.get("max_elevation") is not None, "Max elevation should be recorded"
+    hm = elevation.get("heightmap")
+    if hm:
+        assert len(hm) == len(hm[0]), "Heightmap should be square padded"
+    assert elevation.get("resolution"), "DEM resolution should be recorded"
+    assert elevation.get("source"), "DEM source URL should be recorded"
+    dem_status = terrain.get("etl_layers", {}).get("dem")
+    assert dem_status and dem_status.get("status") == "ok", "DEM ETL status should be tracked"
 
     await client.drop_database(db_name)
     client.close()
@@ -225,7 +232,7 @@ async def test_soil_etl_fetches_and_stores_map_units(analytics_env, vhs):
     geometry = _load_sample("valid_small.json")
     await db.projects.insert_one({"project_id": project_id, "geometry": geometry})
 
-    async with vhs("soil_etl"):
+    async with vhs("soil_etl_status"):
         await api.trigger_etl({"project_id": project_id, "geometry": geometry})
 
     terrain = await db.terrain.find_one({"project_id": project_id})
@@ -233,6 +240,10 @@ async def test_soil_etl_fetches_and_stores_map_units(analytics_env, vhs):
     soil = terrain.get("soil_data") or {}
     assert soil.get("map_units"), "Soil map units should be stored"
     assert soil.get("grid"), "Soil grid should be rasterized"
+    status = terrain.get("etl_layers", {}).get("soil")
+    assert status and status.get("status") == "ok", "Soil ETL status should be recorded"
+    dem_status = terrain.get("etl_layers", {}).get("dem")
+    assert dem_status and dem_status.get("status") == "ok", "DEM ETL status should remain ok"
     elev = terrain.get("elevation_data") or {}
     hm = elev.get("heightmap") or []
     if hm:

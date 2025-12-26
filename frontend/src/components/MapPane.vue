@@ -101,9 +101,20 @@ export default {
       const coord = info?.coordinate || info?.lngLat;
       const lon = Array.isArray(coord) ? coord[0] : info?.lon ?? info?.lngLat?.lon ?? info?.lngLat?.lng;
       const lat = Array.isArray(coord) ? coord[1] : info?.lat ?? info?.lngLat?.lat ?? info?.latlng?.lat;
-      if (typeof lat === 'number' && typeof lon === 'number') {
-        this.$emit('pick', { lat, lon });
+      if (typeof lat !== 'number' || typeof lon !== 'number') return;
+      const row = info?.object?.row ?? null;
+      const col = info?.object?.col ?? null;
+      const dem = info?.object?.elevation;
+      let soilDetail = null;
+      if (row != null && col != null && this._soilGrid) {
+        const code = this._soilGrid?.[row]?.[col];
+        if (code && code !== 0) {
+          const key = this._soilIndex?.[code] ?? this._soilIndex?.[String(code)] ?? String(code);
+          const unit = (this._soilUnits && (this._soilUnits[key] || this._soilUnits[code] || this._soilUnits[String(code)])) || {};
+          soilDetail = { mukey: key, value: code, ...unit };
+        }
       }
+      this.$emit('pick', { lat, lon, row, col, dem, soil: soilDetail });
     },
     _prepareDemData() {
       const src = this._clone(this.dem);
@@ -477,13 +488,20 @@ export default {
       const layers = [...this._buildLayers(ring)];
       if (!layers.length) return;
       const viewState = this._clone(this.viewState);
+      const controller = {
+        dragPan: false,
+        dragRotate: false,
+        touchRotate: false,
+        doubleClickZoom: false,
+      };
       const shared = {
         layers,
         onClick: (info) => this.handleMapClick(info),
         viewState,
-        controller: true,
+        controller,
         width: rect.width,
         height: rect.height,
+        getCursor: () => 'crosshair',
       };
       if (!this.deck) {
         this.deck = new Deck({ ...shared, parent: container });

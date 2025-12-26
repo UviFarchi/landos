@@ -239,16 +239,16 @@ export default {
       }
     };
 
-    const handlePick = ({ lat, lon, dem: demFromMap, row, col }) => {
+    const handlePick = ({ lat, lon, dem: demFromMap, row, col, soil: soilFromMap }) => {
       if (!state.grid) return;
       const topo = sampleTopography(lat, lon, state.grid.dem || state.grid) || {};
       const dem = demFromMap ?? topo.elevation ?? sampleDem(lat, lon, state.grid.dem || state.grid);
-      const soil = sampleSoil(lat, lon, state.grid);
+      const sampledSoil = soilFromMap || sampleSoil(lat, lon, state.grid);
       setInspector({
         lat,
         lon,
         dem,
-        soil,
+        soil: sampledSoil,
         row: row ?? topo.row,
         col: col ?? topo.col,
         slope: topo.slope,
