@@ -22,7 +22,7 @@ describe("MapPane", () => {
     await wrapper.vm.handleMapClick(evt);
     const emitted = wrapper.emitted("pick");
     expect(emitted).toBeTruthy();
-    expect(emitted[0][0]).toEqual({ lat: 10, lon: 20 });
+    expect(emitted[0][0]).toMatchObject({ lat: 10, lon: 20 });
   });
 
   it("does not emit pick when over controls", async () => {

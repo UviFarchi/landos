@@ -20,6 +20,7 @@ from backend.services.analytics.api import ping as ping_service
 from backend.services.analytics.api import calc_area
 from backend.services.analytics.api import determine_region
 from backend.services.analytics.api import trigger_etl as etl_service
+from backend.services.analytics import terrain
 from backend.services.analytics import scheduler
 from pymongo.errors import BulkWriteError
 
@@ -222,6 +223,8 @@ async def initialize():
 
     await _ensure_countries(db)
     await _ensure_subdivisions(db)
+    countries = list(getattr(config, "SUBDIVISION_SOURCES", {}).keys()) or list(terrain.COUNTRY_MODULES.keys())
+    await terrain.initialize_configured(db, countries)
 
     logger.info("Analytics initialize: completed")
     return None

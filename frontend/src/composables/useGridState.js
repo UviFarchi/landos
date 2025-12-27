@@ -6,6 +6,7 @@ const state = reactive({
   layers: {
     dem: true,
     soil: false,
+    land_cover: false,
     border: false,
   },
   inspector: null,
@@ -38,17 +39,18 @@ function setGrid(partial) {
   if (partial?.layers && typeof partial.layers === "object") {
     Object.assign(nextLayers, partial.layers);
   }
-  if (partial?.dem) {
-    nextLayers.dem = partial.dem;
-  }
-  if (partial?.soil) {
-    nextLayers.soil = partial.soil;
-  }
+  ["dem", "soil", "land_cover"].forEach((key) => {
+    if (partial && partial[key]) {
+      nextLayers[key] = partial[key];
+    }
+  });
   const nextGrid = { ...(state.grid || {}), ...(partial || {}) };
+  // ensure we don't duplicate top-level layer data
+  delete nextGrid.dem;
+  delete nextGrid.soil;
+  delete nextGrid.land_cover;
   if (Object.keys(nextLayers).length) {
     nextGrid.layers = nextLayers;
-    if (nextLayers.dem) nextGrid.dem = nextLayers.dem;
-    if (nextLayers.soil) nextGrid.soil = nextLayers.soil;
   }
   state.grid = nextGrid;
   if (state.project?.project_id) {

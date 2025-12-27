@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { latLonToRowCol, sampleDem, sampleSoil } from "../../src/utils/gridSampler";
+import { latLonToRowCol, sampleDem, sampleSoil, sampleLandCover } from "../../src/utils/gridSampler";
 
 const mockGrid = {
   bounds: { left: 0, right: 2, top: 2, bottom: 0 },
@@ -12,6 +12,18 @@ const mockGrid = {
   },
   soil_data: {
     map_units: [{ mukey: "mu1", muname: "Unit 1" }],
+  },
+  land_cover: {
+    grid: [
+      [7, 8],
+      [9, 0],
+    ],
+    index_map: { "7": "Forest", "8": "Water", "9": "Urban" },
+    units: {
+      "7": { name: "Forest" },
+      "8": { name: "Water" },
+      "9": { name: "Urban" },
+    },
   },
 };
 
@@ -35,5 +47,16 @@ describe("gridSampler", () => {
   it("returns soil map unit when available", () => {
     const soil = sampleSoil(1, 1, mockGrid);
     expect(soil).toEqual(mockGrid.soil_data.map_units[0]);
+  });
+
+  it("returns land cover when available", () => {
+    const lc = sampleLandCover(1.25, 0.25, mockGrid);
+    expect(lc.code).toBe("Forest");
+    expect(lc.value).toBe(7);
+  });
+
+  it("returns null for land cover when value is empty", () => {
+    const lc = sampleLandCover(0, 2, mockGrid);
+    expect(lc).toBeNull();
   });
 });

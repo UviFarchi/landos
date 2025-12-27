@@ -23,7 +23,33 @@ const demResponse = {
 };
 
 const soilResponse = {
-  data: { soil_data: { map_units: [{ mukey: "mu1", muname: "Unit 1" }] } },
+  data: {
+    soil_data: {
+      bounds: { left: 0, right: 2, top: 2, bottom: 0 },
+      transform: [1, 0, 0, 0, -1, 2],
+      grid: [
+        [1, 1],
+        [1, 1],
+      ],
+      index_map: { "1": "mu1" },
+      units: { mu1: { mukey: "mu1", muname: "Unit 1", compname: "Comp" } },
+    },
+  },
+};
+
+const landCoverResponse = {
+  data: {
+    land_cover: {
+      bounds: { left: 0, right: 2, top: 2, bottom: 0 },
+      transform: [1, 0, 0, 0, -1, 2],
+      grid: [
+        [7, 8],
+        [9, 0],
+      ],
+      index_map: { "7": "Forest", "8": "Water", "9": "Urban" },
+      units: { "7": { name: "Forest" }, "8": { name: "Water" }, "9": { name: "Urban" } },
+    },
+  },
 };
 
 describe("MainView", () => {
@@ -35,6 +61,9 @@ describe("MainView", () => {
     fetchSpy = vi.spyOn(global, "fetch").mockImplementation((url) => {
       if (url.includes("layer=soil")) {
         return Promise.resolve({ ok: true, json: async () => soilResponse });
+      }
+      if (url.includes("layer=land_cover")) {
+        return Promise.resolve({ ok: true, json: async () => landCoverResponse });
       }
       return Promise.resolve({ ok: true, json: async () => demResponse });
     });
@@ -63,15 +92,30 @@ describe("MainView", () => {
     expect(state.grid.soil).toBeTruthy();
   });
 
+  it("loads land cover on button click", async () => {
+    const wrapper = mount(MainView, { props: { id: mockProject.project_id } });
+    await flushPromises();
+    const lcButton = wrapper.get('[data-test="land-cover-button"]');
+    await lcButton.trigger("click");
+    await flushPromises();
+    const { state } = useGridState();
+    expect(state.grid.land_cover).toBeTruthy();
+  });
+
   it("shows inspector data when map emits pick", async () => {
     const wrapper = mount(MainView, { props: { id: mockProject.project_id } });
     await flushPromises();
     await wrapper.get('[data-test="soil-button"]').trigger("click");
+    await wrapper.get('[data-test="land-cover-button"]').trigger("click");
     const map = wrapper.getComponent({ name: "MapPane" });
     map.vm.$emit("pick", { lat: 1.25, lon: 1.25 });
     await flushPromises();
-    expect(wrapper.text()).toContain("DEM: 10");
-    expect(wrapper.text()).toContain("Soil: Unit 1");
+    const { state } = useGridState();
+    expect(state.inspector?.dem).toBe(10);
+    expect(state.inspector?.soil?.muname || state.inspector?.soil?.mukey).toBe("Unit 1");
+    expect(state.inspector?.landCover?.code || state.inspector?.landCover?.name).toBe("Forest");
+    expect(wrapper.text()).toContain("Elevation");
+    expect(wrapper.text()).toContain("10");
   });
 
   it("toggles border layer with button", async () => {

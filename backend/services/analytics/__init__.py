@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from backend.services.analytics import api
+from backend.services.analytics import api, terrain
 from backend.services.analytics.analytics_db_connection import analytics_db
 
 compute_area_hectares = api.compute_area_hectares
@@ -27,3 +27,4 @@ async def initialize():
 
 # Export DB for internal callers (platform grid endpoint)
 db = analytics_db
+terrain = terrain

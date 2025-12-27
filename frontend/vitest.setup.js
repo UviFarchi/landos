@@ -10,4 +10,15 @@ if (typeof window !== "undefined") {
       dispatchEvent: () => false,
     });
   }
+
+  if (typeof window.WebGLRenderingContext === "undefined") {
+    window.WebGLRenderingContext = function WebGLRenderingContext() {};
+  }
+  if (!HTMLCanvasElement.prototype.getContext) {
+    HTMLCanvasElement.prototype.getContext = () => ({
+      getExtension: () => null,
+      clearColor: () => {},
+      clear: () => {},
+    });
+  }
 }

@@ -16,6 +16,12 @@
 
     <section class="workspace" v-if="token">
       <aside class="projects">
+        <div v-if="loadingProjects" class="overlay">
+          <div class="overlay-content">
+            <span class="spinner" aria-label="Loading projects"></span>
+            Loading projects…
+          </div>
+        </div>
         <div class="header">
           <h3>Your projects</h3>
           <span class="count">{{ projects.length }}</span>
@@ -37,7 +43,7 @@
               <button class="danger small" @click.stop="deleteProject(project)">Delete</button>
             </div>
           </li>
-          <li v-if="projects.length === 0" class="empty">No projects yet.</li>
+          <li v-if="!loadingProjects && projects.length === 0" class="empty">No projects yet.</li>
         </ul>
       </aside>
 
@@ -73,23 +79,31 @@
 
           <div class="actions-card">
             <div class="upload">
+              <div v-if="creatingProject" class="overlay">
+                <div class="overlay-content">
+                  <span class="spinner" aria-label="Creating project"></span>
+                  Creating project…
+                </div>
+              </div>
               <p class="label">Create new project</p>
               <label class="label">Name (optional)</label>
               <input v-model="newProjectName" class="text-input" placeholder="Enter project name" />
-              <label class="upload-box">
-                <input type="file" accept=".json,.geojson" @change="onFile" />
-                <span>Drop polygon file or click to upload</span>
-                <svg v-if="previewPath" :viewBox="previewViewBox" class="preview">
+              <input ref="geojsonInput" type="file" accept=".json,.geojson" class="hidden-input" @change="onFile" />
+              <div class="button-row">
+                <button type="button" class="ghost full" @click="triggerUpload">Upload GeoJSON</button>
+                <button type="button" class="ghost full" @click="selectTerrain">Select terrain</button>
+              </div>
+              <div v-if="previewPath && pendingGeometry" class="preview-box">
+                <svg :viewBox="previewViewBox" class="preview">
                   <path :d="previewPath" fill="rgba(56,189,248,0.35)" stroke="#38bdf8" stroke-width="2" />
                 </svg>
-              </label>
-              <button class="solid full" :disabled="!pendingGeometry" @click="createProject">Create project from polygon</button>
+              </div>
+              <button class="solid full" :disabled="!pendingGeometry || creatingProject" @click="createProject">
+                <span v-if="creatingProject" class="spinner" aria-label="Creating project"></span>
+                {{ creatingProject ? 'Creating…' : 'Create project from polygon' }}
+              </button>
               <p v-if="uploadError" class="error">{{ uploadError }}</p>
               <p v-if="status" class="status">{{ status }}</p>
-            </div>
-            <div class="next-steps">
-              <p class="label">Jump to</p>
-              <router-link to="/selection" class="ghost full">Selection view</router-link>
             </div>
           </div>
         </div>
@@ -120,15 +134,18 @@ export default {
       newProjectName: '',
       previewPath: '',
       previewViewBox: '0 0 100 100',
+      loadingProjects: false,
+      creatingProject: false,
     };
   },
   async created() {
-    if (this.token && this.username) {
-      await this.fetchProjects();
-    }
-  },
+      if (this.token && this.username) {
+        await this.fetchProjects();
+      }
+    },
   methods: {
     async fetchProjects() {
+      this.loadingProjects = true;
       const resp = await fetch(`${API_BASE}/api/platform/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -139,9 +156,16 @@ export default {
         this.projects = body;
         this.selectedProject = this.projects[0] || null;
       }
+      this.loadingProjects = false;
     },
     selectProject(project) {
       this.selectedProject = project;
+    },
+    triggerUpload() {
+      this.$refs.geojsonInput?.click();
+    },
+    selectTerrain() {
+      this.$router.push({ name: 'Selection' });
     },
     loadProject(project) {
       this.selectedProject = project;
@@ -164,6 +188,13 @@ export default {
       if (!resp.ok) {
         this.uploadError = 'Delete failed';
         return;
+      }
+      // Clear any cached state for this project in the browser
+      try {
+        sessionStorage.removeItem(`project:${project.project_id}`);
+        sessionStorage.removeItem(`grid:${project.project_id}`);
+      } catch (e) {
+        // ignore storage errors
       }
       this.status = 'Project deleted';
       await this.fetchProjects();
@@ -189,6 +220,7 @@ export default {
         this.uploadError = 'Please upload a polygon file first.';
         return;
       }
+      this.creatingProject = true;
       const payload = {
         username: this.username,
         name: this.newProjectName || undefined,
@@ -205,6 +237,7 @@ export default {
       const body = await resp.json().catch(() => ({}));
       if (!resp.ok) {
         this.uploadError = body.error || body.detail || 'Project creation failed';
+        this.creatingProject = false;
         return;
       }
       this.status = 'Project created';
@@ -213,6 +246,7 @@ export default {
       this.newProjectName = '';
       this.previewPath = '';
       await this.fetchProjects();
+      this.creatingProject = false;
     },
     buildPreview(geom) {
       try {
@@ -314,6 +348,7 @@ export default {
   border-right: 1px solid #1e293b;
   padding: 20px;
   background: linear-gradient(180deg, #0f172a 0%, #0b1222 100%);
+  position: relative;
 }
 .projects .header {
   display: flex;
@@ -415,15 +450,6 @@ export default {
   display: grid;
   place-items: center;
 }
-.upload-box input {
-  display: none;
-}
-.upload-box .preview {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
 .text-input {
   width: 100%;
   padding: 8px 10px;
@@ -462,6 +488,56 @@ button,
 .status {
   color: #22c55e;
   margin-top: 8px;
+}
+.button-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.hidden-input {
+  display: none;
+}
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(148, 163, 184, 0.5);
+  border-top-color: #38bdf8;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-right: 6px;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.preview-box {
+  border: 1px dashed #334155;
+  border-radius: 12px;
+  padding: 8px;
+  margin-bottom: 10px;
+  background: rgba(15, 23, 42, 0.7);
+}
+.upload {
+  position: relative;
+}
+.overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(11, 18, 34, 0.8);
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  z-index: 2;
+}
+.overlay-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #e2e8f0;
+  font-weight: 600;
 }
 .locked {
   text-align: center;

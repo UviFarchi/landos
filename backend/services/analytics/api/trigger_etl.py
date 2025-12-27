@@ -11,11 +11,14 @@ import logging
 import httpx
 import rasterio
 from rasterio.io import MemoryFile
+from rasterio.transform import Affine, array_bounds
+import math
 import numpy as np
 from shapely.geometry import shape
 
 from backend.services.analytics.analytics_db_connection import analytics_db
-import backend.services.analytics.api.soil as soil
+from backend.services.analytics.api import determine_region
+from backend.services.analytics import terrain
 from backend.services.analytics import config
 
 OPENTOPO_URL = "https://portal.opentopography.org/API/globaldem"
@@ -76,7 +79,7 @@ async def _fetch_tiff(geom, project_id: str):
         return resp.content
 
 
-def _process_tiff(tiff_bytes: bytes):
+def _process_tiff(tiff_bytes: bytes, geom_bounds=None):
     with MemoryFile(tiff_bytes) as memfile:
         with memfile.open() as dataset:
             elevation_array = dataset.read(1)
@@ -86,22 +89,60 @@ def _process_tiff(tiff_bytes: bytes):
             # ensure square grid (pad/crop to max dimension)
             height, width = elevation_array.shape
             target = max(height, width)
-            if height != width:
-                padded = np.zeros((target, target), dtype=elevation_array.dtype)
-                r0 = (target - height) // 2
-                c0 = (target - width) // 2
-                padded[r0:r0 + height, c0:c0 + width] = elevation_array
-                elevation_array = padded
-            min_elev = float(np.min(elevation_array))
-            max_elev = float(np.max(elevation_array))
-            heightmap = elevation_array.tolist()
+            transform = dataset.transform
             bounds = {
                 "left": dataset.bounds.left,
                 "bottom": dataset.bounds.bottom,
                 "right": dataset.bounds.right,
                 "top": dataset.bounds.top,
             }
-            transform = list(dataset.transform)
+            if height != width:
+                padded = np.zeros((target, target), dtype=elevation_array.dtype)
+                r0 = (target - height) // 2
+                c0 = (target - width) // 2
+                padded[r0:r0 + height, c0:c0 + width] = elevation_array
+                elevation_array = padded
+                # Shift transform so original data stays georeferenced at the same location
+                if isinstance(transform, Affine):
+                    transform = transform * Affine.translation(-c0, -r0)
+                bounds_arr = array_bounds(target, target, transform)
+                bounds = {"left": bounds_arr[0], "bottom": bounds_arr[1], "right": bounds_arr[2], "top": bounds_arr[3]}
+            min_elev = float(np.min(elevation_array))
+            max_elev = float(np.max(elevation_array))
+            heightmap = elevation_array.tolist()
+            transform = list(transform)
+    # Optional crop to polygon bbox + 2-cell buffer
+    if geom_bounds and elevation_array is not None:
+        try:
+            minx, miny, maxx, maxy = geom_bounds
+            cell_w = abs(transform[0])
+            cell_h = abs(transform[4])
+            buffer_x = 2 * cell_w
+            buffer_y = 2 * cell_h
+            target = {
+                "left": minx - buffer_x,
+                "right": maxx + buffer_x,
+                "bottom": miny - buffer_y,
+                "top": maxy + buffer_y,
+            }
+            inv = (~Affine(*transform))
+            c0, r0 = inv * (target["left"], target["top"])
+            c1, r1 = inv * (target["right"], target["bottom"])
+            c_min = max(0, int(math.floor(min(c0, c1))))
+            c_max = min(int(math.ceil(max(c0, c1))), len(heightmap[0]))
+            r_min = max(0, int(math.floor(min(r0, r1))))
+            r_max = min(int(math.ceil(max(r0, r1))), len(heightmap))
+            arr = elevation_array[r_min:r_max, c_min:c_max]
+            elevation_array = arr
+            heightmap = elevation_array.tolist()
+            transform = list(Affine(*transform) * Affine.translation(c_min, r_min))
+            b_left, b_bottom, b_right, b_top = array_bounds(arr.shape[0], arr.shape[1], Affine(*transform))
+            bounds = {"left": b_left, "bottom": b_bottom, "right": b_right, "top": b_top}
+            min_elev = float(np.min(elevation_array))
+            max_elev = float(np.max(elevation_array))
+            logger.info("DEM cropped to polygon bbox + buffer: rows=%s cols=%s", arr.shape[0], arr.shape[1])
+        except Exception as exc:
+            logger.warning("DEM crop to polygon bbox failed; keeping padded grid: %s", exc)
     logger.info("DEM processed (min=%.2f, max=%.2f)", min_elev, max_elev)
     return {
         "heightmap": heightmap,
@@ -129,8 +170,14 @@ async def trigger_etl(project: dict):
 
     logger.info("ETL start for project %s", project_id)
     geom = _geometry_from_geojson(geometry)
+    region = {}
+    try:
+        region = await determine_region.resolve_region(geom)
+    except Exception as exc:
+        logger.warning("Region resolution failed for project %s: %s", project_id, exc)
     tiff_bytes = await _fetch_tiff(geom, project_id)
-    elevation = _process_tiff(tiff_bytes)
+    geom_bounds = shape(geom).bounds
+    elevation = _process_tiff(tiff_bytes, geom_bounds=geom_bounds)
     elevation["fetched_at"] = datetime.utcnow()
 
     terrain_doc = {
@@ -148,20 +195,19 @@ async def trigger_etl(project: dict):
     await db.projects.update_one({"project_id": project_id}, {"$set": {"status": "dem_loaded"}})
     logger.info("DEM stored for project %s", project_id)
     try:
-        logger.info("Soil ETL start for project %s", project_id)
-        await soil.fetch_soil_data({"project_id": project_id, "geometry": geom})
-        logger.info("Soil ETL finished for project %s", project_id)
+        logger.info("Country ETL start for project %s (country=%s)", project_id, region.get("country"))
+        await terrain.run_country_etl(region.get("country"), {"project_id": project_id, "geometry": geom})
+        logger.info("Country ETL finished for project %s", project_id)
     except Exception as exc:
-        # Surface errors to caller so tests can catch missing implementation
-        logger.exception("Soil ETL failed for project %s: %s", project_id, exc)
+        logger.exception("Country ETL failed for project %s: %s", project_id, exc)
         await db.terrain.update_one(
             {"project_id": project_id},
             {
                 "$set": {
-                    "etl_layers.soil": {
-                        "status": "failed",
-                        "error": str(exc),
-                        "updated_at": datetime.utcnow().isoformat(),
+                    "etl_layers": {
+                        "dem": terrain_doc["etl_layers"]["dem"],
+                        "soil": {"status": "failed", "error": str(exc), "updated_at": datetime.utcnow().isoformat()},
+                        "land_cover": {"status": "failed", "error": str(exc), "updated_at": datetime.utcnow().isoformat()},
                     }
                 }
             },

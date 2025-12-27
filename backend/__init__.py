@@ -192,17 +192,10 @@ def create_app(
         logger.info("Listed %d projects for user '%s'", len(projects), username)
         return projects
 
-    async def _trigger_soil_etl(project_id: str, geometry: dict | None):
-        try:
-            loop = asyncio.get_running_loop()
-            async def _run():
-                try:
-                    await analytics.api.soil.fetch_soil_data({"project_id": project_id, "geometry": geometry})
-                except Exception as exc:
-                    logger.exception("Async soil ETL retry failed for project %s: %s", project_id, exc)
-            loop.create_task(_run())
-        except Exception as exc:
-            logger.exception("Failed to schedule soil ETL for project %s: %s", project_id, exc)
+    async def _trigger_layer_etl(layer: str, project_id: str, project: dict | None):
+        if not project:
+            raise RuntimeError("Project required for layer ETL")
+        await analytics.terrain.run_country_layer(project.get("country"), layer, {"project_id": project_id, "geometry": project.get("geometry")})
 
     @platform_router.get("/projects/{project_id}/grid")
     async def get_grid(project_id: str, layer: str | None = None, refresh: bool | None = False):
@@ -217,16 +210,26 @@ def create_app(
         logger.info("Grid request project=%s layer=%s", project_id, layer or "all")
         dem = terrain.get("elevation_data")
         soil = terrain.get("soil_data")
+        land_cover = terrain.get("land_cover")
         etl_layers = terrain.get("etl_layers") or {}
-        if refresh and (layer in (None, "soil")):
-            if not soil or (etl_layers.get("soil", {}).get("status") == "failed"):
-                project = await _db().projects.find_one({"project_id": project_id}) or {}
-                await _trigger_soil_etl(project_id, project.get("geometry"))
+        project = await _db().projects.find_one({"project_id": project_id}) or {}
+        if refresh and (layer in (None, "soil", "land_cover")):
+            if layer in (None, "soil") and (not soil or (etl_layers.get("soil", {}).get("status") == "failed")):
+                await _trigger_layer_etl("soil", project_id, project)
+            if (layer in (None, "land_cover")) and (not land_cover or (etl_layers.get("land_cover", {}).get("status") == "failed")):
+                await _trigger_layer_etl("land_cover", project_id, project)
+            terrain = await analytics.db.get_db().terrain.find_one({"project_id": project_id})
+            dem = terrain.get("elevation_data") if terrain else None
+            soil = terrain.get("soil_data") if terrain else None
+            land_cover = terrain.get("land_cover") if terrain else None
+            etl_layers = terrain.get("etl_layers") if terrain else {}
         layers = {}
         if dem:
             layers["dem"] = dem
         if soil:
             layers["soil"] = soil
+        if land_cover:
+            layers["land_cover"] = land_cover
         if layer:
             filtered = layers.get(layer)
             if not filtered:

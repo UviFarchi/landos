@@ -13,8 +13,10 @@ export default {
     polygon: { type: Object, default: null },
     dem: { type: Object, default: null },
     soil: { type: Object, default: null },
+    landCover: { type: Object, default: null },
     showDem: { type: Boolean, default: true },
     showSoil: { type: Boolean, default: false },
+    showLandCover: { type: Boolean, default: false },
     showBorder: { type: Boolean, default: false },
     latitude: { type: Number, default: 0 },
     longitude: { type: Number, default: 0 },
@@ -46,6 +48,10 @@ export default {
     this._soilUnits = null;
     this._soilIndex = null;
     this._soilColorCache = {};
+    this._landCoverGrid = null;
+    this._landCoverIndex = null;
+    this._landCoverUnits = null;
+    this._landCoverColorCache = {};
     this._layersCache = null;
   },
   watch: {
@@ -78,10 +84,19 @@ export default {
         this._renderDeck();
       },
     },
+    landCover: {
+      deep: true,
+      handler() {
+        this._prepareLandCoverData();
+        this._renderDeck();
+      },
+    },
+    showLandCover() { this._layersDirty = true; this._renderDeck(); },
   },
   mounted() {
     this._prepareDemData();
     this._prepareSoilData();
+    this._prepareLandCoverData();
     this._renderDeck();
   },
   beforeUnmount() {
@@ -114,7 +129,16 @@ export default {
           soilDetail = { mukey: key, value: code, ...unit };
         }
       }
-      this.$emit('pick', { lat, lon, row, col, dem, soil: soilDetail });
+      let landCoverDetail = null;
+      if (row != null && col != null && this._landCoverGrid) {
+        const code = this._landCoverGrid?.[row]?.[col];
+        if (code && code !== 0) {
+          const key = this._landCoverIndex?.[String(code)] ?? String(code);
+          const unit = (this._landCoverUnits && (this._landCoverUnits[key] || this._landCoverUnits[code] || this._landCoverUnits[String(code)])) || {};
+          landCoverDetail = { code: key, value: code, ...unit };
+        }
+      }
+      this.$emit('pick', { lat, lon, row, col, dem, soil: soilDetail, landCover: landCoverDetail });
     },
     _prepareDemData() {
       const src = this._clone(this.dem);
@@ -184,6 +208,11 @@ export default {
       const metersPerDegLon = 111320 * Math.cos((centerLat * Math.PI) / 180);
       const dxMeters = ((maxX - minX) / Math.max(cols, 1)) * metersPerDegLon;
       const dyMeters = ((maxY - minY) / Math.max(rows, 1)) * metersPerDegLat;
+      const range = Math.max(1e-6, maxElev - minElev); // avoid zero; deterministic from DEM
+      // Reserve a small vertical band above the DEM for overlays; split evenly across layers
+      const overlayBand = range * 0.03;
+      const overlayStep = overlayBand / 3;
+      const overlayThickness = overlayStep * 0.4;
       this._demMetaPlain = {
         minElev,
         maxElev,
@@ -192,6 +221,8 @@ export default {
         cols,
         dxMeters,
         dyMeters,
+        overlayStep,
+        overlayThickness,
       };
       this._layersDirty = true;
     },
@@ -269,6 +300,23 @@ export default {
        this._soilColorCache = {};
       this._layersDirty = true;
     },
+    _prepareLandCoverData() {
+      const src = this._clone(this.landCover);
+      const lc = src?.land_cover || src?.data?.land_cover || src?.layers?.land_cover || src?.landcover || src;
+      if (!lc) {
+        this._landCoverGrid = null;
+        this._landCoverUnits = null;
+        this._landCoverIndex = null;
+        this._landCoverColorCache = {};
+        this._layersDirty = true;
+        return;
+      }
+      this._landCoverGrid = lc.grid || lc.classification || null;
+      this._landCoverIndex = lc.index_map || lc.indexMap || lc.legend || null;
+      this._landCoverUnits = lc.units || null;
+      this._landCoverColorCache = {};
+      this._layersDirty = true;
+    },
     _soilColorFor(key) {
       const k = key ?? 'soil';
       if (!this._soilColorCache[k]) {
@@ -301,11 +349,43 @@ export default {
       }
       return this._soilColorCache[k];
     },
+    _landCoverColorFor(key) {
+      const k = key ?? 'landcover';
+      if (!this._landCoverColorCache[k]) {
+        // blues/purples with wide lightness for contrast
+        const hash = Math.abs(
+          String(k)
+            .split('')
+            .reduce((acc, ch) => ((acc << 5) - acc + ch.charCodeAt(0)) | 0, 0),
+        );
+        const hue = 200 + (hash % 100); // 200-299 blue/purple
+        const saturation = 50 + (hash % 45); // 50-94%
+        const lightness = 25 + (hash % 55); // 25-79%
+        const c = (1 - Math.abs(2 * lightness / 100 - 1)) * (saturation / 100);
+        const hPrime = hue / 60;
+        const x = c * (1 - Math.abs((hPrime % 2) - 1));
+        let r = 0; let g = 0; let b = 0;
+        if (hPrime >= 0 && hPrime < 1) { r = c; g = x; b = 0; }
+        else if (hPrime < 2) { r = x; g = c; b = 0; }
+        else if (hPrime < 3) { r = 0; g = c; b = x; }
+        else if (hPrime < 4) { r = 0; g = x; b = c; }
+        else if (hPrime < 5) { r = x; g = 0; b = c; }
+        else { r = c; g = 0; b = x; }
+        const m = lightness / 100 - c / 2;
+        this._landCoverColorCache[k] = [
+          Math.round((r + m) * 255),
+          Math.round((g + m) * 255),
+          Math.round((b + m) * 255),
+        ];
+      }
+      return this._landCoverColorCache[k];
+    },
     _buildLayers(ring = []) {
       const demLayer = this._demLayer(ring);
       const soilOverlay = this._soilOverlayLayer();
+      const landCoverOverlay = this._landCoverOverlayLayer();
       const borderOverlay = this._borderOverlayLayer(ring);
-      return [demLayer, soilOverlay, borderOverlay].filter(Boolean);
+      return [demLayer, soilOverlay, landCoverOverlay, borderOverlay].filter(Boolean);
     },
     _isInsidePolygon(point, ring) {
       // simple ray casting
@@ -335,7 +415,7 @@ export default {
         dataComparator: () => true,
         getPolygon: (d) => d.polygon,
         getElevation: (d) => d.elevation,
-        elevationScale: 1.5,
+        elevationScale: 1,
         stroked: false,
         filled: true,
         pickable: true,
@@ -378,12 +458,13 @@ export default {
       }
       let data = insideCells;
       try { data = JSON.parse(JSON.stringify(insideCells)); } catch (e) {}
-      const offset = 177; // lift above DEM surface
+      const step = this._demMetaPlain?.overlayStep || 0;
+      const thickness = this._demMetaPlain?.overlayThickness || 0;
+      const offset = step * 3; // above other overlays
       this._borderCellsFrozen = data.map((d) => ({
         ...d,
         topPolygon: d.polygon.map(([x, y]) => [x, y, (d.elevation ?? 0) + offset]),
       }));
-      const thickness = 5; // cap height
       return new PolygonLayer({
         id: 'border-overlay',
         data: this._borderCellsFrozen,
@@ -415,13 +496,14 @@ export default {
         });
       }
       if (!soilCells.length) return null;
-      const offset = 147; // lift above DEM surface
+      const step = this._demMetaPlain?.overlayStep || 0;
+      const thickness = this._demMetaPlain?.overlayThickness || 0;
+      const offset = step; // first band above DEM
       let data = soilCells.map((d) => ({
         ...d,
         topPolygon: d.polygon.map(([x, y]) => [x, y, (d.elevation) + offset])
       }));
       try { data = JSON.parse(JSON.stringify(data)); } catch (e) {}
-      const thickness = 5; // cap height
       return new PolygonLayer({
         id: 'soil-overlay',
         data,
@@ -437,6 +519,49 @@ export default {
           const base = this._soilColorFor(d._soilKey);
           if (!base || base.length < 3) return [0, 0, 0, 0];
           return [...base, 255];
+        },
+        parameters: { depthTest: true, depthMask: false },
+        pickable: false,
+      });
+    },
+    _landCoverOverlayLayer() {
+      if (!this.showLandCover || !this._landCoverGrid || !this._demCellsPlain?.length) return null;
+      const lcCells = [];
+      for (const cell of this._demCellsPlain) {
+        const r = cell.row;
+        const c = cell.col;
+        const code = this._landCoverGrid?.[r]?.[c];
+        if (code === null || typeof code === 'undefined' || code === 0) continue;
+        const key = this._landCoverIndex?.[String(code)] ?? String(code);
+        lcCells.push({
+          ...cell,
+          _lcKey: key,
+        });
+      }
+      if (!lcCells.length) return null;
+      const step = this._demMetaPlain?.overlayStep || 0;
+      const thickness = this._demMetaPlain?.overlayThickness || 0;
+      const offset = step * 2; // above soil band
+      let data = lcCells.map((d) => ({
+        ...d,
+        topPolygon: d.polygon.map(([x, y]) => [x, y, (d.elevation) + offset])
+      }));
+      try { data = JSON.parse(JSON.stringify(data)); } catch (e) {}
+      return new PolygonLayer({
+        id: 'land-cover-overlay',
+        data,
+        coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+        extruded: true,
+        stroked: false,
+        filled: true,
+        dataComparator: () => true,
+        getPolygon: (d) => d.topPolygon || d.polygon,
+        getElevation: () => thickness,
+        elevationScale: 1,
+        getFillColor: (d) => {
+          const base = this._landCoverColorFor(d._lcKey);
+          if (!base || base.length < 3) return [0, 0, 0, 0];
+          return [...base, 230];
         },
         parameters: { depthTest: true, depthMask: false },
         pickable: false,

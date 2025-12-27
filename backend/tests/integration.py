@@ -6,6 +6,9 @@ health, and core collection initialization. Additional journeys will be added
 as endpoints are implemented.
 """
 
+import json
+from pathlib import Path
+
 import pytest
 from httpx import AsyncClient, ASGITransport
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -13,8 +16,6 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from backend import create_app
 from backend.platform.config import PlatformConfig
 from backend.platform.db_connection import PlatformDatabase
-import json
-from pathlib import Path
 
 
 @pytest.fixture
@@ -31,6 +32,18 @@ async def platform_config():
     await client.drop_database(cfg.mongo_db)
     yield cfg
     await client.drop_database(cfg.mongo_db)
+    client.close()
+
+
+@pytest.fixture(autouse=True)
+async def clean_analytics_db():
+    """
+    Ensure analytics DB is clean so ETL must run for each test.
+    """
+    client = AsyncIOMotorClient("mongodb://localhost:27017")
+    await client.drop_database("analytics")
+    yield
+    await client.drop_database("analytics")
     client.close()
 
 
@@ -269,7 +282,8 @@ async def test_project_creation_success_persists_and_links_user(platform_config,
             layers = terrain.get("etl_layers") or {}
             assert layers.get("dem", {}).get("status") == "ok"
             assert layers.get("soil", {}).get("status") == "ok"
-            assert terrain.get("elevation_data") and terrain.get("soil_data")
+            assert layers.get("land_cover", {}).get("status") == "ok"
+            assert terrain.get("elevation_data") and terrain.get("soil_data") and terrain.get("land_cover")
 
             user = await db.get_db().users.find_one({"username": "alice"})
             linked = user.get("projects") or []
@@ -342,9 +356,11 @@ async def test_grid_endpoint_returns_layers(platform_config, vhs):
                 body = resp.json()
                 assert body.get("layers", {}).get("dem"), "DEM layer should be present"
                 assert body.get("layers", {}).get("soil"), "Soil layer should be present"
+                assert body.get("layers", {}).get("land_cover"), "Land cover layer should be present"
                 etl_layers = body.get("etl_layers") or {}
                 assert etl_layers.get("dem", {}).get("status") == "ok"
                 assert etl_layers.get("soil", {}).get("status") == "ok"
+                assert etl_layers.get("land_cover", {}).get("status") == "ok"
 
                 resp = await client.get(f"/api/platform/projects/{project_id}/grid", params={"layer": "dem"})
                 assert resp.status_code == 200
@@ -358,6 +374,151 @@ async def test_grid_endpoint_returns_layers(platform_config, vhs):
                 assert filtered.get("layer") == "soil"
                 assert filtered.get("data"), "Filtered soil data should be present"
                 assert filtered.get("etl_layers", {}).get("soil", {}).get("status") == "ok"
+                resp = await client.get(f"/api/platform/projects/{project_id}/grid", params={"layer": "land_cover"})
+                assert resp.status_code == 200
+                filtered = resp.json()
+                assert filtered.get("layer") == "land_cover"
+                assert filtered.get("data"), "Filtered land cover data should be present"
+                assert filtered.get("etl_layers", {}).get("land_cover", {}).get("status") == "ok"
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_grid_endpoint_crops_to_polygon_with_buffer(platform_config, vhs):
+    """
+    Larger polygons should be stored cropped to the polygon bbox plus a 2-cell buffer, not padded to a square.
+    """
+    from shapely.geometry import shape
+
+    cfg = platform_config
+    db = PlatformDatabase(cfg)
+    app = create_app(config=cfg, db=db)
+
+    db.connect()
+    await db.get_db().users.insert_one({"username": "alice", "password": "pw123"})
+    db.close()
+
+    geom = _load_sample("valid_large.json")
+    poly = shape(geom["features"][0]["geometry"])
+    minx, miny, maxx, maxy = poly.bounds
+
+    transport = ASGITransport(app=app)
+    async with vhs("platform_grid_etl_large"):
+        async with app.router.lifespan_context(app):
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                payload = {"username": "alice", "name": "Grid Large Project", "geometry": geom}
+                resp = await client.post("/api/platform/projects", json=payload)
+                assert resp.status_code == 201
+                project_id = resp.json().get("project_id")
+                assert project_id
+
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.get(f"/api/platform/projects/{project_id}/grid")
+                assert resp.status_code == 200
+                body = resp.json()
+                layers = body.get("layers") or {}
+                dem = layers.get("dem")
+                soil = layers.get("soil")
+                land_cover = layers.get("land_cover")
+                assert dem and soil and land_cover, "DEM, soil, and land cover should all be present"
+                hm = dem.get("heightmap") or []
+                assert hm, "DEM heightmap should be present"
+                rows = len(hm)
+                cols = len(hm[0])
+                assert soil.get("grid") and len(soil["grid"]) == rows and len(soil["grid"][0]) == cols, "Soil grid should align with DEM"
+                assert land_cover.get("grid") and len(land_cover["grid"]) == rows and len(land_cover["grid"][0]) == cols, "Land cover grid should align with DEM"
+                b = dem.get("bounds") or {}
+                transform = dem.get("transform") or []
+                assert transform and len(transform) >= 6, "DEM transform should be present"
+                cell_w = abs(transform[0])
+                cell_h = abs(transform[4])
+                # Expect bbox cropped to polygon + 2 cells in every direction (within one cell tolerance)
+                expected = {
+                    "left": minx - 2 * cell_w,
+                    "right": maxx + 2 * cell_w,
+                    "bottom": miny - 2 * cell_h,
+                    "top": maxy + 2 * cell_h,
+                }
+                tol = max(cell_w, cell_h) * 1.1
+                assert b, "DEM bounds should be present"
+                assert b.get("left") == pytest.approx(expected["left"], abs=tol)
+                assert b.get("right") == pytest.approx(expected["right"], abs=tol)
+                assert b.get("bottom") == pytest.approx(expected["bottom"], abs=tol)
+                assert b.get("top") == pytest.approx(expected["top"], abs=tol)
+
+                # Layers should share bounds/transform and cell sizes
+                for layer in (soil, land_cover):
+                    lb = layer.get("bounds") or {}
+                    lt = layer.get("transform") or []
+                    assert lb and lt and len(lt) >= 6, "Layer bounds/transform should be present"
+                    assert lb.get("left") == pytest.approx(b.get("left"), abs=tol)
+                    assert lb.get("right") == pytest.approx(b.get("right"), abs=tol)
+                    assert lb.get("bottom") == pytest.approx(b.get("bottom"), abs=tol)
+                    assert lb.get("top") == pytest.approx(b.get("top"), abs=tol)
+                    lcw = abs(lt[0])
+                    lch = abs(lt[4])
+                    assert lcw == pytest.approx(cell_w, rel=1e-3, abs=1e-6)
+                    assert lch == pytest.approx(cell_h, rel=1e-3, abs=1e-6)
+
+                etl_layers = body.get("etl_layers") or {}
+                assert etl_layers.get("dem", {}).get("status") == "ok"
+                assert etl_layers.get("soil", {}).get("status") == "ok"
+                assert etl_layers.get("land_cover", {}).get("status") == "ok"
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_grid_endpoint_backfills_missing_layer_via_country_etl(platform_config, vhs):
+    """
+    If a requested layer is missing, the grid endpoint should trigger the country ETL for that layer.
+    """
+    cfg = platform_config
+    db = PlatformDatabase(cfg)
+    app = create_app(config=cfg, db=db)
+
+    # Seed user
+    db.connect()
+    await db.get_db().users.insert_one({"username": "alice", "password": "pw123"})
+    db.close()
+
+    transport = ASGITransport(app=app)
+    async with vhs("platform_grid_etl"):
+        async with app.router.lifespan_context(app):
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                payload = {
+                    "username": "alice",
+                    "name": "Grid Backfill Project",
+                    "geometry": _load_sample("valid_small.json"),
+                }
+                resp = await client.post("/api/platform/projects", json=payload)
+                assert resp.status_code == 201
+                project_id = resp.json().get("project_id")
+                assert project_id
+
+            # Simulate missing land cover
+            analytics_client = AsyncIOMotorClient("mongodb://localhost:27017")
+            await analytics_client.analytics.terrain.update_one(
+                {"project_id": project_id}, {"$unset": {"land_cover": "", "etl_layers.land_cover": ""}}
+            )
+            terrain_missing = await analytics_client.analytics.terrain.find_one({"project_id": project_id})
+            assert not terrain_missing.get("land_cover"), "Precondition: land_cover removed before backfill"
+            analytics_client.close()
+
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.get(f"/api/platform/projects/{project_id}/grid", params={"layer": "land_cover", "refresh": True})
+                assert resp.status_code == 200
+                body = resp.json()
+                assert body.get("layer") == "land_cover"
+                assert body.get("data"), "Land cover data should be present after backfill"
+                etl_layers = body.get("etl_layers") or {}
+                assert etl_layers.get("land_cover", {}).get("status") == "ok"
+
+            # Ensure terrain now has land cover stored
+            analytics_client = AsyncIOMotorClient("mongodb://localhost:27017")
+            terrain = await analytics_client.analytics.terrain.find_one({"project_id": project_id})
+            analytics_client.close()
+            assert terrain and terrain.get("land_cover"), "Land cover should be persisted after backfill"
+            assert terrain.get("etl_layers", {}).get("land_cover", {}).get("status") == "ok"
 
 @pytest.mark.integration
 @pytest.mark.anyio

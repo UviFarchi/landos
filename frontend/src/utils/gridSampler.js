@@ -11,7 +11,8 @@ function resolveDem(grid) {
 
 function resolveSoil(grid) {
   if (!grid) return { units: null, bounds: null, heightmap: null, grid: null, index: null };
-  const candidate = grid.soil_data || grid.data?.soil_data || grid.layers?.soil || grid.soil || grid;
+  let candidate = grid.soil_data || grid.data?.soil_data || grid.layers?.soil || grid.soil || grid;
+  if (candidate && candidate.soil_data) candidate = candidate.soil_data;
   const demSource = grid.dem || grid.layers?.dem || grid.data?.layers?.dem || grid;
   const { bounds: demBounds, heightmap: demHeightmap } = resolveDem(demSource);
   const bounds = candidate?.bounds || grid.bounds || demBounds;
@@ -24,6 +25,20 @@ function resolveSoil(grid) {
   const soilGrid = candidate?.grid || null;
   const indexMap = candidate?.index_map || candidate?.indexMap || null;
   return { units, bounds, heightmap, grid: soilGrid, index: indexMap };
+}
+
+function resolveLandCover(grid) {
+  if (!grid) return { grid: null, bounds: null, heightmap: null, index: null, units: null };
+  let candidate = grid.land_cover || grid.layers?.land_cover || grid.data?.land_cover || grid.landcover || grid;
+  if (candidate && candidate.land_cover) candidate = candidate.land_cover;
+  const demSource = grid.dem || grid.layers?.dem || grid.data?.layers?.dem || grid;
+  const { bounds: demBounds, heightmap: demHeightmap } = resolveDem(demSource);
+  const bounds = candidate?.bounds || grid.bounds || demBounds;
+  const lcGrid = candidate?.grid || candidate?.classification || null;
+  const heightmap = demHeightmap;
+  const index = candidate?.index_map || candidate?.indexMap || candidate?.legend || null;
+  const units = candidate?.units || null;
+  return { grid: lcGrid, bounds, heightmap, index, units };
 }
 
 export function latLonToRowCol(lat, lon, grid) {
@@ -108,4 +123,16 @@ export function sampleSoil(lat, lon, grid) {
   }
   if (Array.isArray(units) && units.length) return units[0];
   return null;
+}
+
+export function sampleLandCover(lat, lon, grid) {
+  const { grid: lcGrid, bounds, heightmap, index, units } = resolveLandCover(grid);
+  if (!lcGrid || !Array.isArray(lcGrid)) return null;
+  const { row, col } = latLonToRowCol(lat, lon, { bounds, elevation_data: { heightmap } });
+  if (row < 0 || col < 0) return null;
+  const val = lcGrid[row] && lcGrid[row][col];
+  if (!val || val === 0) return null;
+  const code = index ? index[String(val)] || String(val) : String(val);
+  const unit = (units && (units[String(val)] || units[code])) || {};
+  return { code, value: val, ...unit };
 }

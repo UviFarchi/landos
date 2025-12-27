@@ -6,3 +6,4 @@ __pycache__/
 node_modules/
 /landos_ref
 /backend/services/analytics/data/watertable
+/backend/services/analytics/data/land_cover_cache/

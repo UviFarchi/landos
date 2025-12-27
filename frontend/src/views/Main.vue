@@ -35,7 +35,16 @@
           >
             Soil
           </button>
+          <button
+            class="ghost"
+            :class="{ active: layers.land_cover, loading: landCoverLoading }"
+            data-test="land-cover-button"
+            @click="handleLandCover"
+          >
+            Land Cover
+          </button>
           <div v-if="soilLoading" class="muted small">Fetching soil data…</div>
+          <div v-if="landCoverLoading" class="muted small">Fetching land cover data…</div>
           <div v-if="gridError" class="alert">{{ gridError }}</div>
         </section>
 
@@ -43,9 +52,11 @@
           <map-pane
             :polygon="project.geometry"
             :dem="plainDem"
-            :soil="grid.soil"
+            :soil="grid.layers?.soil"
+            :land-cover="grid.layers?.land_cover"
             :show-dem="true"
             :show-soil="layers.soil"
+            :show-land-cover="layers.land_cover"
             :show-border="layers.border"
             v-bind="mapState"
             @pick="handlePick"
@@ -93,6 +104,13 @@
                   <tr v-if="soilAttr(inspector.soil, 'clay', 'claytotal_r')"><td>Clay</td><td>{{ soilAttr(inspector.soil, 'clay', 'claytotal_r') }}</td></tr>
                 </tbody>
               </table>
+              <table class="inspector-table" v-if="layers.land_cover">
+                <thead><tr><th colspan="2">Land Cover</th></tr></thead>
+                <tbody>
+                  <tr><td>Code</td><td>{{ inspector.landCover ? (inspector.landCover.code || inspector.landCover.value || '—') : '—' }}</td></tr>
+                  <tr v-if="inspector.landCover && inspector.landCover.name"><td>Name</td><td>{{ inspector.landCover.name }}</td></tr>
+                </tbody>
+              </table>
             </div>
             <div v-else class="muted small">Click on the map to inspect a point.</div>
           </div>
@@ -107,7 +125,7 @@ import { onMounted, computed, ref } from 'vue';
 import MapPane from '../components/MapPane.vue';
 import { useGridState } from '../composables/useGridState';
 import { fetchGrid } from '../utils/gridApi';
-import { sampleDem, sampleSoil, sampleTopography } from '../utils/gridSampler';
+import { sampleDem, sampleSoil, sampleTopography, sampleLandCover } from '../utils/gridSampler';
 
 export default {
   name: 'MainView',
@@ -118,6 +136,7 @@ export default {
     const loading = ref(false);
     const gridError = ref('');
     const soilLoading = ref(false);
+    const landCoverLoading = ref(false);
     const username = (localStorage.getItem('username') || '').toLowerCase();
     const mapState = ref({
       latitude: 0,
@@ -239,16 +258,36 @@ export default {
       }
     };
 
-    const handlePick = ({ lat, lon, dem: demFromMap, row, col, soil: soilFromMap }) => {
+    const loadLandCover = async () => {
+      gridError.value = '';
+      try {
+        console.info('[grid] Fetching land cover from API…');
+        const lcResp = await fetchGrid(props.id, 'land_cover');
+        const landCover = lcResp?.data || lcResp?.layers?.land_cover || lcResp;
+        if (landCover) {
+          setLayer('land_cover', landCover);
+          console.info('[grid] Land cover loaded and cached');
+        } else {
+          gridError.value = 'Land cover data unavailable.';
+        }
+      } catch (e) {
+        gridError.value = 'Failed to load land cover data.';
+      }
+    };
+
+    const handlePick = ({ lat, lon, dem: demFromMap, row, col, soil: soilFromMap, landCover: landCoverFromMap }) => {
       if (!state.grid) return;
-      const topo = sampleTopography(lat, lon, state.grid.dem || state.grid) || {};
-      const dem = demFromMap ?? topo.elevation ?? sampleDem(lat, lon, state.grid.dem || state.grid);
+      const demLayer = state.grid.layers?.dem || state.grid.dem || state.grid;
+      const topo = sampleTopography(lat, lon, demLayer) || {};
+      const dem = demFromMap ?? topo.elevation ?? sampleDem(lat, lon, demLayer);
       const sampledSoil = soilFromMap || sampleSoil(lat, lon, state.grid);
+      const sampledLandCover = landCoverFromMap || sampleLandCover(lat, lon, state.grid);
       setInspector({
         lat,
         lon,
         dem,
         soil: sampledSoil,
+        landCover: sampledLandCover,
         row: row ?? topo.row,
         col: col ?? topo.col,
         slope: topo.slope,
@@ -263,14 +302,14 @@ export default {
     const handleSoil = async () => {
       gridError.value = '';
       // Always fetch if missing or still loading data
-      if (!state.grid?.soil) {
+      if (!state.grid?.layers?.soil) {
         soilLoading.value = true;
         try {
           await loadSoil();
-          if (state.grid?.soil && !state.layers.soil) {
+          if (state.grid?.layers?.soil && !state.layers.soil) {
             toggleLayer('soil');
           }
-          if (!state.grid?.soil) {
+          if (!state.grid?.layers?.soil) {
             gridError.value = gridError.value || 'Soil data not available yet.';
           }
         } finally {
@@ -280,6 +319,27 @@ export default {
       }
       console.info('[grid] Soil already present, toggling layer');
       toggleLayer('soil');
+    };
+
+    const handleLandCover = async () => {
+      gridError.value = '';
+      if (!state.grid?.layers?.land_cover) {
+        landCoverLoading.value = true;
+        try {
+          await loadLandCover();
+          if (state.grid?.layers?.land_cover && !state.layers.land_cover) {
+            toggleLayer('land_cover');
+          }
+          if (!state.grid?.layers?.land_cover) {
+            gridError.value = gridError.value || 'Land cover data not available yet.';
+          }
+        } finally {
+          landCoverLoading.value = false;
+        }
+        return;
+      }
+      console.info('[grid] Land cover already present, toggling layer');
+      toggleLayer('land_cover');
     };
 
     const handleBorder = () => {
@@ -330,6 +390,7 @@ export default {
       demStats,
       gridError,
       soilLoading,
+      landCoverLoading,
       soilAttr: (soil, ...keys) => {
         if (!soil) return null;
         for (const k of keys) {
@@ -343,6 +404,8 @@ export default {
       handlePick,
       loadSoil,
       handleSoil,
+      loadLandCover,
+      handleLandCover,
       handleBorder,
       mapState,
     };
