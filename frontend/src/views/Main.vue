@@ -174,7 +174,7 @@ export default {
     const inspector = computed(() => state.inspector);
     const grid = computed(() => state.grid || {});
     const demStats = computed(() => {
-      const src = grid.value.dem || grid.value;
+      const src = grid.value.layers?.dem || grid.value.dem || grid.value;
       const hm =
         src?.elevation_data?.heightmap ||
         src?.data?.elevation_data?.heightmap ||
@@ -196,7 +196,7 @@ export default {
       return { min, max };
     });
     const plainDem = computed(() => {
-      const src = grid.value.dem || grid.value;
+      const src = grid.value.layers?.dem || grid.value.dem || grid.value;
       if (!src) return null;
       try {
         return JSON.parse(JSON.stringify(src));
@@ -208,7 +208,7 @@ export default {
     const loadGrid = async (force = false) => {
       gridError.value = '';
       if (!props.id) return true;
-      if (!force && state.grid?.dem) {
+      if (!force && state.grid?.layers?.dem) {
         // Already have DEM (possibly from session); skip fetch
         console.info('[grid] DEM present in state/session, skipping fetch');
         return true;
@@ -222,7 +222,7 @@ export default {
     };
 
     const loadGridWithRetry = async () => {
-      if (state.grid?.dem) return;
+      if (state.grid?.layers?.dem) return;
       const maxAttempts = 12;
       const delayMs = 5000;
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -246,7 +246,7 @@ export default {
       try {
         console.info('[grid] Fetching soil from API…');
         const soilResp = await fetchGrid(props.id, 'soil');
-        const soil = soilResp?.data || soilResp?.layers?.soil || soilResp;
+        const soil = soilResp?.layers?.soil || soilResp?.data?.soil || soilResp?.data?.soil_data || soilResp?.soil_data || soilResp;
         if (soil) {
           setLayer('soil', soil);
           console.info('[grid] Soil loaded and cached');
@@ -263,7 +263,7 @@ export default {
       try {
         console.info('[grid] Fetching land cover from API…');
         const lcResp = await fetchGrid(props.id, 'land_cover');
-        const landCover = lcResp?.data || lcResp?.layers?.land_cover || lcResp;
+        const landCover = lcResp?.layers?.land_cover || lcResp?.data?.land_cover || lcResp?.land_cover || lcResp;
         if (landCover) {
           setLayer('land_cover', landCover);
           console.info('[grid] Land cover loaded and cached');

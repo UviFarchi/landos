@@ -15,16 +15,18 @@ const mockProject = {
 };
 
 const demResponse = {
-  data: {
-    bounds: { left: 0, right: 2, top: 2, bottom: 0 },
-    transform: [1, 0, 0, 0, -1, 2],
-    elevation_data: { heightmap: [[10, 20],[30, 40]] },
+  layers: {
+    dem: {
+      bounds: { left: 0, right: 2, top: 2, bottom: 0 },
+      transform: [1, 0, 0, 0, -1, 2],
+      elevation_data: { heightmap: [[10, 20],[30, 40]] },
+    },
   },
 };
 
 const soilResponse = {
-  data: {
-    soil_data: {
+  layers: {
+    soil: {
       bounds: { left: 0, right: 2, top: 2, bottom: 0 },
       transform: [1, 0, 0, 0, -1, 2],
       grid: [
@@ -38,7 +40,7 @@ const soilResponse = {
 };
 
 const landCoverResponse = {
-  data: {
+  layers: {
     land_cover: {
       bounds: { left: 0, right: 2, top: 2, bottom: 0 },
       transform: [1, 0, 0, 0, -1, 2],
@@ -78,8 +80,8 @@ describe("MainView", () => {
     await flushPromises();
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const { state } = useGridState();
-    expect(state.grid.dem).toBeTruthy();
-    expect(state.grid.soil).toBeUndefined();
+    expect(state.grid.layers?.dem).toBeTruthy();
+    expect(state.grid.layers?.soil).toBeUndefined();
   });
 
   it("loads soil on button click", async () => {
@@ -89,7 +91,7 @@ describe("MainView", () => {
     await soilButton.trigger("click");
     await flushPromises();
     const { state } = useGridState();
-    expect(state.grid.soil).toBeTruthy();
+    expect(state.grid.layers?.soil).toBeTruthy();
   });
 
   it("loads land cover on button click", async () => {
@@ -99,7 +101,7 @@ describe("MainView", () => {
     await lcButton.trigger("click");
     await flushPromises();
     const { state } = useGridState();
-    expect(state.grid.land_cover).toBeTruthy();
+    expect(state.grid.layers?.land_cover).toBeTruthy();
   });
 
   it("shows inspector data when map emits pick", async () => {
